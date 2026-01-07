@@ -56,9 +56,6 @@ async fn main() {
     });
 
     // TODO: remove and read from file
-    let webhook = Webhook::from_url(&shared_http,
-                                    "").await.unwrap();
-
     // ======================================================================================
     // IRC initialization
     let config = Config {
@@ -89,13 +86,28 @@ async fn main() {
                 let irc_chan = String::from_str(i_channel).expect("Channel name is not valid! {i_channel}");
                 let mut ircs = Vec::new();
                 ircs.push(irc_chan);
-                assoc.bridge_assoc.insert(ChannelId::new(chid), ircs);
+                assoc.bridge_assoc.insert(ChannelId::new(chid), ircs.clone());
             }
         },
         None => { panic!("Expected an [assoc] section with bridge associations.") },
     }
+
+    // find the webhook urls now
+    match ini.section(Some("webhook")) {
+        Some(section_contents) => {
+            for (chid_str, webhook_url) in section_contents.iter() {
+                let chid = u64::from_str(chid_str).expect("Channel ID is not valid! {chid_str}");
+                let webhook_url = String::from_str(webhook_url).expect("Webhook URL is not valid! {webhook_url}");
+                assoc.chid_webhook_assoc.insert(ChannelId::new(chid), webhook_url);
+            }
+        },
+        None => { panic!("Expected a [webhook] section with webhook associations.") },
+    }
+    
     println!("{:?}", assoc.bridge_assoc.keys());
     println!("{:?}", assoc.bridge_assoc.values());
+    println!("Webhooks:");
+    println!("{:?}", assoc.chid_webhook_assoc.keys());
 
     // ======================================================================================
     // Relay consumer thread spawn
@@ -104,10 +116,11 @@ async fn main() {
             buffer_reference,
             notify,
             shared_http,
-            webhook,
             irc_sender,
             assoc
         )
         .await;
     });
+
+    loop {}
 }
