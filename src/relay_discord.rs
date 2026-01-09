@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use serenity::all::Message;
+use serenity::all::MessageUpdateEvent;
 use serenity::all::Ready;
 use serenity::async_trait;
 use serenity::prelude::*;
@@ -40,6 +41,49 @@ impl EventHandler for Handler {
             let notify = data.get::<RelayNotify>().unwrap().clone();
             notify.notify.notify_one();
         }
+    }
+
+    async fn message_update(&self,
+                            ctx: Context,
+                            old_if_available: Option<Message>,
+                            new_if_available: Option<Message>,
+                            event: MessageUpdateEvent)
+    {
+        // if the original or new message is not available, it doesn't make sense to store it, as the IRC
+        // side would have no context of the edit.
+        if let None = old_if_available { return };
+        if let None = new_if_available { return };
+        
+        let old = old_if_available.unwrap();
+        let new = new_if_available.unwrap();
+
+        // open the shared lock as write
+        let data = ctx.data.read().await;
+        let buffer_lock = data.get::<MessageBuffer>().unwrap().clone();
+
+        if let Some(_) = old.webhook_id {
+            println!("Discarding webhook edit.");
+            return;
+        };
+        
+        {
+            let mut relay_buffer = buffer_lock.write().await;
+            // create a new message with the received discord message contents
+            let mut new_message = RelayMessage::default();
+            new_message.direction = RelayDirection::DIS2IRC(new.channel_id);
+            new_message.author = new.author.name;
+
+            let edit_message = format!("edited: \"{}\"\r\n\t↪ {}", old.content, new.content);
+            new_message.contents = edit_message;
+
+            // push the pending message to the relay buffer
+            relay_buffer.pending_relay_messages.push_back(new_message);
+        }
+        {
+            let notify = data.get::<RelayNotify>().unwrap().clone();
+            notify.notify.notify_one();
+        }
+        
     }
 
     async fn ready(&self, _: Context, ready: Ready) {

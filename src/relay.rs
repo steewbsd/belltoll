@@ -165,7 +165,25 @@ pub async fn relay_consumer(
                     RelayDirection::DIS2IRC(t) => {
                         let webhook = Webhook::from_url(&http, assoc.chid_webhook_assoc.get(&t).expect("Expected a webhook url for channel {t.get()}")).await.unwrap();
                         let builder: ExecuteWebhook;
+                        // let guilds = http.get_guilds(None, None).await.unwrap();
                         let avatar_url: Option<String> = None;
+                        // for guild in guilds {
+                        //     let members = http.get_guild_members(guild.id, None, None).await.unwrap();
+                        //     for member in members {
+                        //         println!("Member: {:?}", member.nick);
+                        //         let mut name = member.user.name.clone();
+                        //         if let Some(nick) = member.nick.clone() {
+                        //             name = nick;
+                        //         }
+                        //         if pending.author.eq_ignore_ascii_case(&name) {
+                        //             println!("Found match: {}", name);
+                        //             avatar_url = member.avatar_url;
+                        //             println!("Avatar URL: {:?}", avatar_url);
+                        //             break;
+                        //         }
+                        //     }
+                        // }
+
                         if let Some(avatar_url) = avatar_url {
                             println!("{avatar_url}");
                             builder = ExecuteWebhook::new().content(pending.contents).username(pending.author).avatar_url(avatar_url);

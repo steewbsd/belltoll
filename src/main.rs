@@ -7,6 +7,7 @@ use ini::Ini;
 use irc::client::data::Config;
 use irc::proto::Command;
 use serenity::all::ChannelId;
+use serenity::all::Settings;
 use serenity::all::Webhook;
 use serenity::prelude::*;
 use tokio::spawn;
@@ -34,9 +35,13 @@ async fn main() {
     // Discord initialization
     // ======================================================================================
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+
+    let mut cache_settings = Settings::default();
+    cache_settings.max_messages = 10_000;
     
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILDS | GatewayIntents::GUILD_MEMBERS;
     let mut discord_client = serenity::Client::builder(&token, intents)
+        .cache_settings(cache_settings)
         .event_handler(Handler)
         .await
         .expect("Err creating client");
@@ -51,9 +56,11 @@ async fn main() {
     // shared http sender for the discord client
     let shared_http = discord_client.http.clone();
     let shared_cache = discord_client.cache.clone();
-
-    let avatars: HashMap<String, String> = HashMap::new();
     
+    let avatars: HashMap<String, String> = HashMap::new();
+
+    // avatar url initialization
+
     // spawn discord client async thread
     let _client_handle = spawn(async move {
         if let Err(why) = discord_client.start().await {
@@ -94,6 +101,7 @@ async fn main() {
         },
         None => { panic!("Expected a [webhook] section with webhook associations.") },
     }
+
     
     println!("{:?}", assoc.bridge_assoc.keys());
     println!("{:?}", assoc.bridge_assoc.values());
