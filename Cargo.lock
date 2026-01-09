@@ -64,6 +64,7 @@ dependencies = [
  "irc",
  "rust-ini",
  "serenity",
+ "sha1",
  "tokio",
 ]
 

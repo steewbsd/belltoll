@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use ini::Ini;
 use irc::client::data::Config;
+use irc::proto::Command;
 use serenity::all::ChannelId;
 use serenity::all::Webhook;
 use serenity::prelude::*;
@@ -47,6 +50,9 @@ async fn main() {
     
     // shared http sender for the discord client
     let shared_http = discord_client.http.clone();
+    let shared_cache = discord_client.cache.clone();
+
+    let avatars: HashMap<String, String> = HashMap::new();
     
     // spawn discord client async thread
     let _client_handle = spawn(async move {
@@ -55,23 +61,6 @@ async fn main() {
         }
     });
 
-    // TODO: remove and read from file
-    // ======================================================================================
-    // IRC initialization
-    let config = Config {
-        nickname: Some("belltoll".to_owned()),
-        server: Some("irc.libera.chat".to_owned()),
-        channels: vec!["##steew".to_owned()],
-        ..Default::default()
-    };
-
-    let irc_client = irc::client::Client::from_config(config).await.unwrap();
-    irc_client.identify().unwrap();
-    let irc_sender = irc_client.sender().clone();
-
-    let _irc_handle = spawn(async move {
-        irc_producer(irc_client, irc_buffer_reference, irc_notify).await;
-    });
     // Configuration file read for channel bridge associations
     // ======================================================================================
     let ini_conf_file = "config.ini";
@@ -86,7 +75,9 @@ async fn main() {
                 let irc_chan = String::from_str(i_channel).expect("Channel name is not valid! {i_channel}");
                 let mut ircs = Vec::new();
                 ircs.push(irc_chan);
-                assoc.bridge_assoc.insert(ChannelId::new(chid), ircs.clone());
+                let chid = ChannelId::new(chid);
+                assoc.bridge_assoc.insert(chid, ircs.clone());
+                // =========================
             }
         },
         None => { panic!("Expected an [assoc] section with bridge associations.") },
@@ -108,6 +99,31 @@ async fn main() {
     println!("{:?}", assoc.bridge_assoc.values());
     println!("Webhooks:");
     println!("{:?}", assoc.chid_webhook_assoc.keys());
+    println!("Avatar URLs:");
+    println!("{:?}", avatars.values());
+
+    // ======================================================================================
+    // IRC initialization
+    let config = Config {
+        nickname: Some("belltoll".to_owned()),
+        server: Some("irc.libera.chat".to_owned()),
+        channels: vec!["##steew".to_owned()],
+        ..Default::default()
+    };
+
+    let irc_client = irc::client::Client::from_config(config).await.unwrap();
+    irc_client.identify().unwrap();
+    let irc_sender = irc_client.sender().clone();
+
+    for v in assoc.bridge_assoc.values() {
+        for c in v.iter() {
+            irc_client.send_join(c).expect("Could not join channel {c}");
+        }
+    }
+
+    let _irc_handle = spawn(async move {
+        irc_producer(irc_client, irc_buffer_reference, irc_notify).await;
+    });
 
     // ======================================================================================
     // Relay consumer thread spawn
@@ -117,7 +133,8 @@ async fn main() {
             notify,
             shared_http,
             irc_sender,
-            assoc
+            assoc,
+            avatars
         )
         .await;
     });

@@ -3,11 +3,14 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use irc::client::Sender;
+use serenity::all::Cache;
 use serenity::all::ChannelId;
 use serenity::all::ExecuteWebhook;
 use serenity::all::Http;
 use serenity::all::Webhook;
+use serenity::builder;
 use serenity::prelude::*;
+use sha1::{Sha1, Digest};
 use tokio::sync::Notify;
 
 #[derive(Debug)]
@@ -17,10 +20,19 @@ pub enum RelayDirection {
     DIS2IRC(ChannelId),
 }
 
+pub enum MessageType {
+    Normal,
+    // discord reply, containing the u64 message id that it references, and the author name.
+    ReplyDiscord((String, String)),
+    // irc reply, containing the message base64 hash it references.
+    ReplyIrc(String)
+}
+
 pub struct RelayMessage {
     pub contents: String,
     pub direction: RelayDirection,
-    pub author: String
+    pub author: String,
+    pub message_type: MessageType 
 }
 
 pub struct MessageBuffer {
@@ -82,7 +94,8 @@ impl Default for RelayMessage {
         RelayMessage {
             contents: String::new(),
             direction: RelayDirection::INVALID,
-            author: String::new()
+            author: String::new(),
+            message_type: MessageType::Normal
         }
     }
 }
@@ -103,13 +116,33 @@ impl TypeMapKey for RelayNotify {
     type Value = Arc<RelayNotify>;
 }
 
+fn format_name(name: &str) -> String {
+    // XMPP RFC 3174 implementation
+    // get hash
+    let mut hasher = Sha1::new();
+    hasher.update(name);
+    let result = hasher.finalize();
+    // obtain the last 16 bits
+    let last16 = result.last_chunk::<2>().unwrap();
+    let last16_float  = f32::from(((last16[0] as u16) << 8) | (last16[1] as u16));
+    let hue = last16_float * 360.0 / 65535.0;
+    let hue = hue.ceil();
+    let hue: u32 = hue.to_bits() % 87;
+    println!("{hue}");
+    // insert invisible character to prevent pings
+    let (split_name_first, split_name_rest) = name.split_at(1);
+
+    format!("\x03{hue:02}{split_name_first}​{split_name_rest}\x03")
+}
+
 
 pub async fn relay_consumer(
     buffer: Arc<RwLock<MessageBuffer>>,
     notify: Arc<RelayNotify>,
     http: Arc<Http>,
     sender: Sender,
-    assoc: RelayAssoc
+    assoc: RelayAssoc,
+    avatars: HashMap<String, String>
 ) {
     loop {
         // await for new relay pending events
@@ -131,31 +164,45 @@ pub async fn relay_consumer(
                 match target {
                     RelayDirection::DIS2IRC(t) => {
                         let webhook = Webhook::from_url(&http, assoc.chid_webhook_assoc.get(&t).expect("Expected a webhook url for channel {t.get()}")).await.unwrap();
-                        let builder = ExecuteWebhook::new().content(pending.contents).username(pending.author);
+                        let builder: ExecuteWebhook;
+                        let avatar_url: Option<String> = None;
+                        if let Some(avatar_url) = avatar_url {
+                            println!("{avatar_url}");
+                            builder = ExecuteWebhook::new().content(pending.contents).username(pending.author).avatar_url(avatar_url);
+                        } else {
+                            builder = ExecuteWebhook::new().content(pending.contents).username(pending.author);
+                        }
+                        
                         webhook.execute(&http, false, builder).await.expect("Could not execute webhook.");
                     },
                     _ => { panic!("Found no target to send the message to!") }
                 }
             }
             RelayDirection::DIS2IRC(chan) => {
-                let unpingable_name = pending.author.clone();
-                let (first, rest) = unpingable_name.split_at(1);
-                let mut unpingable_name = String::new();
-                unpingable_name.push(char::from_u32(0x03).unwrap());
-                unpingable_name.push_str("04");
-                unpingable_name.push_str(first);
-                unpingable_name.push_str("​");
-                unpingable_name.push_str(rest);
-                unpingable_name.push(char::from_u32(0x03).unwrap());
-                
+                let source_name = format_name(&pending.author);
                 let target = assoc.find_target(RelayDirection::DIS2IRC(chan));
-
                 match target {
                     RelayDirection::IRC2DIS(t) => {
-                        let response = format!("<{}>: {}", unpingable_name, pending.contents);
+                        let response;
+                        let message_contents = pending.contents;
+                        match pending.message_type {
+                            MessageType::ReplyDiscord(tuple) => {
+                                let target_reply_user = format_name(&tuple.1);
+                                let origin_contents = tuple.0;
+                                response = format!("<{source_name} replying to: {target_reply_user}> \"{origin_contents}\"\r\n\t↪ {message_contents}");
+                            },
+                            MessageType::Normal => {
+                                response = format!("<{source_name}> {message_contents}");
+                            },
+                            _ => {
+                                // found invalid message type here!!
+                                println!("Invalid reply type found.");
+                                return;
+                            }
+                        }
                         sender.send_privmsg(t, response).unwrap();
                     },
-                    _ => { panic!("Found no target to send the message to!") }
+                    _ => { println!("Found no target to send the message to!") }
                 }
             }
             _ => {}

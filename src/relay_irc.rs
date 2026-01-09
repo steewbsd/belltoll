@@ -19,7 +19,13 @@ pub async fn irc_producer(
         match message.command {
             Command::PRIVMSG(_, contents) => {
                 {
+                    println!("IRC!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                     let uname = msg_clone.source_nickname().unwrap();
+                    println!("username: {uname}, current nick: {}", irc_client.current_nickname());
+                    if uname.eq_ignore_ascii_case(irc_client.current_nickname()) {
+                        println!("Ignoring message from myself!");
+                        return;
+                    };
                     let mut buffer = buffer_reference.write().await;
                     let mut new_message = RelayMessage::default();
                     new_message.contents = contents;

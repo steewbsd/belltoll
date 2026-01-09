@@ -9,4 +9,5 @@ futures-util = "0.3.31"
 irc = "1.1.0"
 rust-ini = "0.21.3"
 serenity = "0.12.5"
+sha1 = "0.10.6"
 tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
